@@ -1,6 +1,7 @@
 from abc import abstractmethod
 
 import pygame
+from pygame.constants import K_ESCAPE
 import pygame.display
 import pygame.draw
 import pygame.event
@@ -27,30 +28,33 @@ class Game:
         self.height = height
         self.display = pygame.display.set_mode((self.width, self.height))
 
+        self.base_fps = 60
         self.game_objects: list[GameObject] = []
+        self.key_pressed: list[int] = []
         self.running = True
+
+    def update_game_objects(self):
+        for obj in self.game_objects:
+            obj.update(self.display)
 
     def loop(self):
         while self.running:
-            self.clock.tick(60)
+            self.clock.tick(self.base_fps)
 
             for e in pygame.event.get():
                 if e.type == pygame.QUIT:
                     self.running = False
             
-            key_pressed = pygame.key.get_pressed()
-
+            self.key_pressed = pygame.key.get_pressed()
             self.display.fill(Color.BLACK)
-
-            for obj in self.game_objects:
-                obj.update(self.display, key_pressed)
+            self.update_game_objects()
 
             pygame.display.flip()
 
 
 class GameObject:
     @abstractmethod
-    def update(self, surface: pygame.Surface, key_pressed: int): ...
+    def update(self, surface: pygame.Surface): ...
 
 
 class Structure(GameObject):
@@ -60,14 +64,14 @@ class Structure(GameObject):
         self.height = 20
         self.rect = pygame.Rect(left, top, self.width, self.height)
 
-    def update(self, surface: pygame.Surface, key_pressed: int):
+    def update(self, surface: pygame.Surface):
         pygame.draw.rect(surface, Color.RED, self.rect)
         
 
 class Player(GameObject):
     def __init__(self, game: Game):
         self.game = game
-        self.moving = False
+        self.moving = None
         self.speed = 10
         self.width = 80
         self.height = 20
@@ -76,7 +80,9 @@ class Player(GameObject):
                                 self.width, 
                                 self.height)
 
-    def update(self, surface: pygame.Surface, key_pressed: int):
+    def update(self, surface: pygame.Surface):
+        key_pressed = self.game.key_pressed
+
         if key_pressed[pygame.K_LEFT]:
             self.rect.move_ip(-self.speed, 0)
             self.moving = "left"
@@ -99,7 +105,6 @@ class Player(GameObject):
 class Ball(GameObject):
     def __init__(self, game: Game):
         self.game = game
-        self.direction = "down"
         self.speed_x = 5
         self.speed_y = 5
         self.width = 20
@@ -109,7 +114,7 @@ class Ball(GameObject):
                                 self.width, 
                                 self.height)
 
-    def update(self, surface: pygame.Surface, key_pressed: int):
+    def update(self, surface: pygame.Surface):
         self.rect.move_ip(self.speed_x, self.speed_y)
 
         if self.rect.top < 0:
@@ -155,5 +160,8 @@ if __name__ == "__main__":
         Structure(game, 328, 0),
         Structure(game, 410, 0),
         Structure(game, 492, 0),
+        Structure(game, 492, 40),
+        Structure(game, 492, 120),
+        Structure(game, 492, 300),
     ]
     game.loop()
