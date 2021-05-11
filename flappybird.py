@@ -7,6 +7,8 @@ import pygame.image
 import pygame.display
 import pygame.key
 import pygame.transform
+import pygame.mouse
+import pygame.mixer
 
 import random
 
@@ -20,7 +22,7 @@ class Color:
 
 
 class Player(pygame.sprite.Sprite):
-    def __init__(self, top: float, left: float):
+    def __init__(self):
         super().__init__()
 
         self.images = {
@@ -32,8 +34,8 @@ class Player(pygame.sprite.Sprite):
         self.swap_image(self.images["midflap"])
 
         self.rect = self.image.get_rect()
-        self.rect.top = top - self.rect.height / 2
-        self.rect.left = left - self.rect.width / 2
+        self.rect.top = pygame.display.get_window_size()[1] / 2 - self.rect.height / 2
+        self.rect.left = pygame.display.get_window_size()[0] / 2 - self.rect.width / 2
 
         self.speed_x = 0
         self.speed_y = 0
@@ -48,7 +50,7 @@ class Player(pygame.sprite.Sprite):
     def rotate_image(self, angle: float):
         self.image = pygame.transform.rotate(self.image, angle)
 
-    def update(self, **kwargs):
+    def update(self, **kwargs: dict):
         if kwargs.get("is_jumping"):
             self.speed_y = -10
 
@@ -119,9 +121,77 @@ class Floor(pygame.sprite.Sprite):
 
     def update(self):
         if self.rect.left + self.rect.width < 0:
-            self.kill()
+            self.rect.left = pygame.display.get_window_size()[0]
 
         self.rect.move_ip(-2, 0)
+
+
+class Message(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+
+        self.image = pygame.image.load("./flappy-bird-assets/sprites/message.png")
+        self.image = pygame.transform.scale2x(self.image)
+        self.rect = self.image.get_rect()
+        
+        wx = pygame.display.get_window_size()[0] / 2 - self.rect.width / 2
+        wy = pygame.display.get_window_size()[1] / 2 - self.rect.height / 2
+
+        self.rect.top = wy
+        self.rect.left = wx
+
+        self.waiting_for_input = True
+
+    def update(self):
+        right_click, _, _ = pygame.mouse.get_pressed()
+
+        if right_click:
+            self.waiting_for_input = False
+
+
+class GameOver(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+
+        self.image = pygame.image.load("./flappy-bird-assets/sprites/gameover.png")
+        self.image = pygame.transform.scale2x(self.image)
+        self.rect = self.image.get_rect()
+        
+        wx = pygame.display.get_window_size()[0] / 2 - self.rect.width / 2
+        wy = pygame.display.get_window_size()[1] / 2 - self.rect.height / 2
+
+        self.rect.top = wy
+        self.rect.left = wx
+
+        self.waiting_for_input = False
+
+    def update(self):
+        right_click, _, _ = pygame.mouse.get_pressed()
+
+        if right_click:
+            self.waiting_for_input = False
+
+
+class Score(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+
+        self.load_score_image(0)
+
+    def load_score_image(self, score: int):
+        self.image = pygame.image.load(f"./flappy-bird-assets/sprites/{score}.png")
+        self.image = pygame.transform.scale2x(self.image)
+        self.rect = self.image.get_rect()
+        self.rect.left = pygame.display.get_window_size()[0] / 4
+        self.rect.top = pygame.display.get_window_size()[1] / 4
+
+        self.sound = pygame.mixer.Sound("./flappy-bird-assets/audio/point.wav")
+
+    def update(self, **kwargs: dict):
+        new_score = kwargs.get("score", 0)
+
+        self.sound.play()
+        self.load_score_image(new_score)
 
 
 class Game:
@@ -135,32 +205,53 @@ class Game:
         self.clock = pygame.time.Clock()
 
         self.background = pygame.sprite.RenderPlain(Background())
-        self.floor = pygame.sprite.Group(Floor(), Floor(self.window_size[0] / 2))
-        self.player = pygame.sprite.RenderPlain(Player(self.window_size[0] / 2, self.window_size[1] / 2))
-        self.pipes = pygame.sprite.Group(
-            Pipe(800),
-            Pipe(800, position="bottom"),
-            # Pipe(800, backspace=10),
-            # Pipe(800, backspace=200, position="bottom")
-        )
+        self.floor = pygame.sprite.Group()
+        self.pipes = pygame.sprite.Group()
+        self.spawn_player()
+
+        self.is_dead = True
+        self.is_gameover = False
+        self.score_value = 0
+        self.pipelines: list[pygame.Rect] = []
+        self.last_collided_pipeline = None
+
+        self.hit_audio = pygame.mixer.Sound("./flappy-bird-assets/audio/hit.wav")
+        self.wing_audio = pygame.mixer.Sound("./flappy-bird-assets/audio/wing.wav")
+
+        self.message = pygame.sprite.RenderPlain(Message())
+        self.gameover = pygame.sprite.RenderPlain(GameOver())
+        self.score = pygame.sprite.RenderPlain(Score())
+
+        self.add_floor(4)
+        self.add_pipe(2)
 
         self.running = True
 
-    def add_pipe(self):
-        height = random.randint(-300, 100)
+    def spawn_player(self):
+        self.player = pygame.sprite.RenderPlain(Player())
 
-        if len(self.pipes) < 4:
-            distance = 1600
-        else:
-            distance = 1200
+    def add_pipe(self, quantity: int):
+        for i in range(quantity):
+            height = random.randint(-300, 100)
 
-        bottom_pipe = Pipe(distance, backspace=height, position="bottom")
-        upper_pipe = Pipe(distance, backspace=height)
+            variance = random.randint(pygame.display.get_window_size()[0] / 2, pygame.display.get_window_size()[0])
+            distance = variance * (len(self.pipes) if len(self.pipes) > 0 else 1)
 
-        self.pipes.add(bottom_pipe, upper_pipe)
+            bottom_pipe = Pipe(distance, backspace=height, position="bottom")
+            upper_pipe = Pipe(distance, backspace=height)
 
-    def add_floor(self):
-        self.floor.add(Floor((self.window_size[0] / 2 * 2)))
+            self.pipes.add(bottom_pipe, upper_pipe)
+
+            self.pipelines.append(pygame.Rect(
+                bottom_pipe.rect.left + bottom_pipe.rect.width * 2, 
+                upper_pipe.rect.top + upper_pipe.rect.height, upper_pipe.rect.width / 4, upper_pipe.rect.height
+            ))
+
+    def add_floor(self, quantity: int):
+        for i in range(quantity):
+            floor = Floor()
+            floor.rect.left = floor.rect.width * len(self.floor)
+            self.floor.add(floor)
 
     def loop(self):
         while self.running:
@@ -172,35 +263,75 @@ class Game:
                 if e.type == pygame.QUIT:
                     self.running = False
 
-                if e.type == pygame.KEYDOWN:
-                    if e.key == pygame.K_UP:
+                if e.type == pygame.MOUSEBUTTONDOWN:
+                    if e.button == 1:
+                        if not jumping and self.is_dead:
+                            self.is_dead = False
+                            self.is_gameover = False
+                            self.spawn_player()
                         jumping = True
+                        self.wing_audio.play()
+
 
             self.display.fill(Color.BLACK)
             self.clock.tick(self.fps)
 
             if len(self.pipes) < 6:
-                self.add_pipe()
-            if len(self.floor) < 3:
-                self.add_floor()
+                self.add_pipe(2)
 
-            self.player.update(is_jumping=jumping)
-            self.pipes.update()
+            if not self.is_dead and not self.is_gameover:
+                self.player.update(is_jumping=jumping)
+                self.pipes.update()
+
             self.floor.update()
+            self.message.update()
+            self.gameover.update()
  
             self.background.draw(self.display)
-            self.pipes.draw(self.display)
+
+            if not self.is_dead and not self.is_gameover:
+                self.pipes.draw(self.display)
+                self.score.draw(self.display)
+
             self.player.draw(self.display)
             self.floor.draw(self.display)
+            
+            if self.is_dead and not self.is_gameover:
+                self.message.draw(self.display)
+            if self.is_dead and self.is_gameover:
+                self.gameover.draw(self.display)
 
-            collision = pygame.sprite.spritecollideany(self.player.sprites()[0], self.pipes)
+            for line in self.pipelines:
+                line.move_ip(-2, 0)
 
-            if collision:
-                self.running = False
+            collision_floor, collision_pipe = None, None
+
+            if not self.is_dead and not self.is_gameover:
+                collision_floor = pygame.sprite.spritecollideany(self.player.sprites()[0], self.floor)
+                collision_pipe = pygame.sprite.spritecollideany(self.player.sprites()[0], self.pipes)
+                collision_pipeline = self.player.sprites()[0].rect.collidelistall(self.pipelines)
+
+                if collision_pipeline:
+                    if self.last_collided_pipeline != collision_pipeline[0]:
+                        if self.score_value > 9:
+                            self.score_value = 0
+                        self.score_value += 1
+                        self.score.update(score=self.score_value)
+                        self.last_collided_pipeline = collision_pipeline[0]
+
+            if not self.is_dead and collision_floor or collision_pipe:
+                self.gameover.draw(self.display)
+                self.hit_audio.play()
+                self.is_dead = True
+                self.is_gameover = True
+                self.pipes = pygame.sprite.Group()
+                self.player = pygame.sprite.RenderPlain()
+                self.score_value = 0
+                self.score.update(score=self.score_value)
 
             pygame.display.flip()
 
 
 if __name__ == "__main__":
-    game = Game((600, 640))
+    game = Game((800, 640))
     game.loop()
