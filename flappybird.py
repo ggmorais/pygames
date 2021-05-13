@@ -56,10 +56,10 @@ class Player(pygame.sprite.Sprite):
 
         if self.speed_y < 0:
             self.swap_image(self.images["downflap"])
-            self.rotate_image(20)
+            # self.rotate_image(20)
         else:
             self.swap_image(self.images["upflap"])
-            self.rotate_image(-20)
+            # self.rotate_image(-20)
         if self.speed_y < self.speed_y_limit:
             self.speed_y += 0.5
 
@@ -94,13 +94,11 @@ class Pipe(pygame.sprite.Sprite):
 
         self.rect.left = left
 
-        fixed_backspace = 350
-
         if position == "top":
             self.image = pygame.transform.rotate(self.image, 180)
-            self.rect.top = -(fixed_backspace - backspace)
+            self.rect.top = -(pygame.display.get_window_size()[1] / 2) + backspace
         elif position == "bottom":
-            self.rect.bottom = fixed_backspace + pygame.display.get_window_size()[1] + backspace
+            self.rect.top = (pygame.display.get_window_size()[1] / 2) + backspace
 
     def update(self):
         if self.rect.left + self.rect.width < 0:
@@ -190,7 +188,8 @@ class Score(pygame.sprite.Sprite):
     def update(self, **kwargs: dict):
         new_score = kwargs.get("score", 0)
 
-        self.sound.play()
+        if new_score > 0:
+            self.sound.play()
         self.load_score_image(new_score)
 
 
@@ -200,11 +199,12 @@ class Game:
         self.fps = fps
 
         pygame.init()
+        pygame.display.set_caption("Flappybird")
 
         self.display = pygame.display.set_mode(self.window_size)
         self.clock = pygame.time.Clock()
 
-        self.background = pygame.sprite.RenderPlain(Background())
+        self.background = pygame.sprite.RenderPlain()
         self.floor = pygame.sprite.Group()
         self.pipes = pygame.sprite.Group()
         self.spawn_player()
@@ -223,7 +223,7 @@ class Game:
         self.score = pygame.sprite.RenderPlain(Score())
 
         self.add_floor(4)
-        self.add_pipe(2)
+        self.add_pipe(10)
 
         self.running = True
 
@@ -232,13 +232,15 @@ class Game:
 
     def add_pipe(self, quantity: int):
         for i in range(quantity):
-            height = random.randint(-300, 100)
+            height = random.randint(-100, 100)
 
-            variance = random.randint(pygame.display.get_window_size()[0] / 2, pygame.display.get_window_size()[0])
-            distance = variance * (len(self.pipes) if len(self.pipes) > 0 else 1)
+            if len(self.pipes) > 0:
+                distance = self.pipes.sprites()[-1].rect.left + 300
+            else:
+                distance = pygame.display.get_window_size()[0]
 
+            upper_pipe = Pipe(distance, backspace=height - 70)
             bottom_pipe = Pipe(distance, backspace=height, position="bottom")
-            upper_pipe = Pipe(distance, backspace=height)
 
             self.pipes.add(bottom_pipe, upper_pipe)
 
@@ -254,84 +256,92 @@ class Game:
             self.floor.add(floor)
 
     def loop(self):
+        self.events = pygame.event.get()
+
+        jumping = False
+
+        for e in self.events:
+            if e.type == pygame.QUIT:
+                self.running = False
+
+            if e.type == pygame.MOUSEBUTTONDOWN:
+                if e.button == 1:
+                    if not jumping and self.is_dead:
+                        self.is_dead = False
+                        self.is_gameover = False
+                        self.spawn_player()
+                    jumping = True
+                    self.wing_audio.play()
+
+
+        self.display.fill(Color.BLACK)
+        self.clock.tick(self.fps)
+
+        if len(self.pipes) < 6:
+            self.add_pipe(2)
+
+        if not self.is_dead and not self.is_gameover:
+            self.player.update(is_jumping=jumping)
+            self.pipes.update()
+
+        self.floor.update()
+        self.message.update()
+        self.gameover.update()
+
+        self.background.draw(self.display)
+
+        if not self.is_dead and not self.is_gameover:
+            self.pipes.draw(self.display)
+            self.score.draw(self.display)
+
+        # pygame.draw.rect(self.display, (255, 0, 0, 128), self.player.sprites()[0].rect)
+        self.player.draw(self.display)
+        self.floor.draw(self.display)
+        
+        if self.is_dead and not self.is_gameover:
+            self.message.draw(self.display)
+        if self.is_dead and self.is_gameover:
+            self.gameover.draw(self.display)
+
+        for line in self.pipelines:
+            line.move_ip(-2, 0)
+
+        collision_floor, collision_pipe = None, None
+
+        if not self.is_dead and not self.is_gameover:
+            collision_floor = pygame.sprite.spritecollideany(self.player.sprites()[0], self.floor)
+            collision_pipe = pygame.sprite.spritecollideany(self.player.sprites()[0], self.pipes)
+            collision_pipeline = self.player.sprites()[0].rect.collidelistall(self.pipelines)
+
+            if collision_pipeline:
+                if self.last_collided_pipeline != collision_pipeline[0]:
+                    if self.score_value > 9:
+                        self.score_value = 0
+                    self.score_value += 1
+                    self.score.update(score=self.score_value)
+                    self.last_collided_pipeline = collision_pipeline[0]
+
+        if not self.is_dead and collision_floor or collision_pipe:
+            self.gameover.draw(self.display)
+            self.hit_audio.play()
+            self.is_dead = True
+            self.is_gameover = True
+            self.pipelines = []
+            self.pipes = pygame.sprite.Group()
+            self.player = pygame.sprite.RenderPlain()
+            self.score_value = 0
+            self.score.update(score=self.score_value)
+
+            print("dead")
+
+
+        pygame.display.flip()
+
+    def start(self):
         while self.running:
-            self.events = pygame.event.get()
-
-            jumping = False
-
-            for e in self.events:
-                if e.type == pygame.QUIT:
-                    self.running = False
-
-                if e.type == pygame.MOUSEBUTTONDOWN:
-                    if e.button == 1:
-                        if not jumping and self.is_dead:
-                            self.is_dead = False
-                            self.is_gameover = False
-                            self.spawn_player()
-                        jumping = True
-                        self.wing_audio.play()
-
-
-            self.display.fill(Color.BLACK)
-            self.clock.tick(self.fps)
-
-            if len(self.pipes) < 6:
-                self.add_pipe(2)
-
-            if not self.is_dead and not self.is_gameover:
-                self.player.update(is_jumping=jumping)
-                self.pipes.update()
-
-            self.floor.update()
-            self.message.update()
-            self.gameover.update()
- 
-            self.background.draw(self.display)
-
-            if not self.is_dead and not self.is_gameover:
-                self.pipes.draw(self.display)
-                self.score.draw(self.display)
-
-            self.player.draw(self.display)
-            self.floor.draw(self.display)
-            
-            if self.is_dead and not self.is_gameover:
-                self.message.draw(self.display)
-            if self.is_dead and self.is_gameover:
-                self.gameover.draw(self.display)
-
-            for line in self.pipelines:
-                line.move_ip(-2, 0)
-
-            collision_floor, collision_pipe = None, None
-
-            if not self.is_dead and not self.is_gameover:
-                collision_floor = pygame.sprite.spritecollideany(self.player.sprites()[0], self.floor)
-                collision_pipe = pygame.sprite.spritecollideany(self.player.sprites()[0], self.pipes)
-                collision_pipeline = self.player.sprites()[0].rect.collidelistall(self.pipelines)
-
-                if collision_pipeline:
-                    if self.last_collided_pipeline != collision_pipeline[0]:
-                        if self.score_value > 9:
-                            self.score_value = 0
-                        self.score_value += 1
-                        self.score.update(score=self.score_value)
-                        self.last_collided_pipeline = collision_pipeline[0]
-
-            if not self.is_dead and collision_floor or collision_pipe:
-                self.gameover.draw(self.display)
-                self.hit_audio.play()
-                self.is_dead = True
-                self.is_gameover = True
-                self.pipes = pygame.sprite.Group()
-                self.player = pygame.sprite.RenderPlain()
-                self.score_value = 0
-                self.score.update(score=self.score_value)
-
-            pygame.display.flip()
+            self.loop()
 
 
 if __name__ == "__main__":
     game = Game((800, 640))
-    game.loop()
+    game.start()
